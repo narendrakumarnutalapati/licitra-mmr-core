@@ -1,0 +1,661 @@
+\documentclass[sigconf,natbib=false]{acmart}
+
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{microtype}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!10}
+}
+
+%%% arXiv preprint mode — remove ACM copyright block
+\setcopyright{none}
+\acmDOI{}
+\acmISBN{}
+\acmConference{}
+\acmYear{2026}
+\copyrightyear{2026}
+
+\begin{document}
+
+\title{LICITRA-MMR: A Merkle Mountain Range Ledger Primitive for\\
+Cryptographic Runtime Accountability in Agentic AI Systems}
+
+\author{Narendra Kumar Nutalapati}
+\affiliation{%
+  \institution{Independent Researcher, LICITRA Research Program}
+}
+\email{narendrakumar.nutalapati@gmail.com}
+
+\begin{abstract}
+Agentic AI systems that make autonomous decisions in production create a
+new class of accountability requirement: the ability to reconstruct, after
+the fact, the exact decision chain with cryptographic verifiability --- a
+stronger guarantee than operational logs alone provide. Existing logging
+approaches --- including mutable database logs, hash chains, and
+general-purpose tamper-evident stores not tailored for agentic governance
+--- provide observability but do not explicitly address independently
+verifiable runtime decision chains. We present LICITRA-MMR, an open-source
+ledger primitive that combines a Merkle Mountain Range (MMR) data structure
+with per-organization epoch anchoring, a versioned canonical JSON
+specification, and an atomic two-phase commit pipeline. At a block size of
+1,000 events, LICITRA-MMR produces inclusion proofs requiring 14 SHA-256
+operations, verifies a full epoch chain of 1,000 epochs in under 1~ms, and
+supports full leaf rehash of 1 million events in approximately 2 seconds.
+The system is fully open-source under MIT license with a tagged release,
+reproducible test suite, and evidence bundles. LICITRA-MMR is designed as
+a foundational cryptographic audit layer for agentic AI governance systems.
+\end{abstract}
+
+\keywords{Merkle Mountain Range, agentic AI, cryptographic audit, runtime
+integrity, tamper-evident logging, AI governance}
+
+\maketitle
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Introduction}
+
+Regulatory frameworks for high-risk AI systems are converging on a common
+implicit technical requirement: that organizations can reconstruct AI
+decision chains after an incident with sufficient integrity to satisfy
+legal and audit scrutiny. The EU AI Act Article~12~\cite{euaiact} requires
+that high-risk AI systems generate logs that are traceable and sufficient
+for post-market monitoring. The Colorado AI Act~\cite{coloradoai} (SB~24-205,
+effective June~30, 2026) requires deployers to document AI decision-making
+processes and conduct impact assessments. Both frameworks are consistent
+with an audit capability that most production agentic AI stacks do not
+currently provide.
+
+The gap is primarily technical rather than conceptual. Most teams deploy
+agentic AI with mutable database logs, cloud logging pipelines, or
+dashboard-based observability. These systems answer the question: \textit{what
+does our log say happened?} They do not answer: \textit{can we prove the log
+was not modified after the incident?} The distinction matters because
+administrators can rewrite database rows, cloud logs can be truncated or
+filtered, and cleanup scripts can alter historical records. A post-incident
+forensic investigation that relies entirely on operator-controlled logs
+provides no independent verification guarantee.
+
+Agentic systems intensify this problem. Unlike single-inference ML systems,
+autonomous agents make multi-step decisions --- each step potentially
+triggering real-world actions --- without per-action human oversight. The
+decision chain that produced a harmful outcome may span dozens of sequential
+operations, each dependent on prior context. Reconstructing that chain
+requires not just that each event was logged, but that the sequence is
+complete, ordered, and unmodified.
+
+We make the following contributions:
+
+\begin{enumerate}
+\item \textbf{Canonical JSON Specification.} A versioned, cross-implementation
+  deterministic serialization format (CANONICAL\_JSON\_SPEC v1.0) that
+  ensures identical byte sequences from identical logical payloads across
+  independent implementations --- a prerequisite for deterministic verification.
+
+\item \textbf{MMR-Based Per-Organization Tamper-Evident Ledger.} A Merkle
+  Mountain Range data structure providing $O(\log n)$ inclusion proofs and
+  append-only semantics, with per-organization epoch anchoring that chains
+  epoch roots into a hash-linked sequence resistant to retroactive modification.
+
+\item \textbf{Atomic Two-Phase Commit Pipeline.} A propose~$\to$~policy~$\to$
+  commit pipeline in which every MMR append, event record, and epoch
+  finalization occurs within a single database transaction, preventing partial
+  writes that could leave the ledger in an inconsistent state.
+
+\item \textbf{Open-Source Implementation with Reproducible Evidence.} A fully
+  tested (11/11 passing), MIT-licensed implementation at tagged release
+  v0.1.0-mvp, with reproducible JSON evidence bundles covering five
+  tamper-detection scenarios.
+\end{enumerate}
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Background}
+
+\subsection{Merkle Mountain Ranges}
+
+A Merkle Mountain Range is an append-only authenticated data structure
+introduced by Peter Todd in the context of Bitcoin timestamping~\cite{todd2013}.
+Unlike many Merkle tree implementations, in which insertion requires updating
+internal nodes along the rightmost path, an MMR avoids modifying previously
+committed subtrees. It maintains a forest of perfect binary trees (peaks)
+that are merged as new leaves are appended. This property makes MMRs ideal
+for append-only audit logs: each new element extends the structure in
+$O(\log n)$ time and space without modifying any existing node.
+
+Formally, an MMR of size $n$ stores $2n - \text{popcount}(n)$ nodes, where
+$\text{popcount}(n)$ is the number of set bits in the binary representation
+of $n$. The peaks of the MMR are the roots of the constituent perfect binary
+trees. A single MMR root is produced by bagging the peaks: hashing them
+right-to-left into a single digest. An inclusion proof for a leaf at
+position $p$ consists of the sibling hashes on the path from $p$ to its
+subtree peak, plus the remaining peaks, enabling logarithmic verification
+without access to the full node set.
+
+At \textsc{block\_size}~$= 1{,}000$ (our default epoch size), the MMR
+contains 1,994 nodes and produces inclusion proofs requiring exactly 14
+hash operations. This compares favorably to a standard Merkle tree over
+the same leaf count, which requires $\lceil\log_2(1000)\rceil = 10$ hashes
+per proof path but requires updating internal nodes on insertion. The
+formal optimality of the MMR for append-only accumulators was established
+by Bonneau et al.~\cite{bonneau2025}.
+
+\subsection{Epoch Anchoring}
+
+LICITRA-MMR partitions the event stream into fixed-size epochs of
+\textsc{block\_size} events. When an epoch reaches capacity, an epoch
+record is finalized containing:
+
+\begin{lstlisting}
+epoch_hash = SHA-256(prev_epoch_hash || mmr_root
+                     || SHA-256(metadata))
+\end{lstlisting}
+
+where \texttt{prev\_epoch\_hash} is the hash of the preceding epoch (or a
+32-byte genesis value for epoch~0), \texttt{mmr\_root} is the bagged peak
+hash of the epoch's MMR, and \texttt{metadata} is a canonical JSON document
+containing the organization ID, epoch ID, sequence range, event count, and
+ledger version.
+
+This construction chains epochs into a hash-linked sequence analogous to a
+blockchain header chain, but without distributed consensus overhead.
+Modifying any event within an epoch invalidates that epoch's MMR root,
+which invalidates all subsequent epoch hashes. An auditor who holds the
+current epoch hash and any historical event can verify the complete chain
+of custody from genesis to present.
+
+\subsection{The Agentic AI Accountability Gap}
+
+Contemporary agentic AI systems --- systems that autonomously plan and
+execute multi-step tasks using large language models as reasoning engines
+--- introduce accountability challenges not present in traditional ML
+deployments. In a single-inference deployment, a harmful output is a
+discrete event that can be logged with a timestamp and input/output pair.
+In an agentic system, a harmful outcome may result from a sequence of
+individually benign decisions that collectively produce an unintended
+effect. Attributing the outcome requires reconstructing the full decision
+chain: which prompts the agent saw, which tools it invoked, which
+intermediate results it relied upon, and which final action it executed.
+
+Existing logging infrastructure is not designed for this requirement.
+Application logs capture events as they occur but provide no
+tamper-evidence guarantees. Observability platforms aggregate telemetry
+but rely on operator-controlled infrastructure. Neither provides the
+forensic integrity consistent with emerging AI regulation: the ability for
+an external party to verify, independently of the operator, that a complete
+and unmodified record of the decision chain exists.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Threat Model}
+
+LICITRA-MMR is designed to protect the integrity of an append-only audit
+ledger against post-hoc modification. We consider the following attacker
+classes and explicitly state what the system does and does not protect
+against.
+
+\subsection{Protected Against}
+
+\textbf{T1 --- Insider / Database Administrator.} An attacker with direct
+write access to the database attempts to modify the \texttt{canonical\_json}
+field of a committed event. The leaf hash stored separately in the
+\texttt{leaf\_hash} column will no longer match the recomputed SHA-256 of
+the modified canonical JSON, and MMR verification will fail at the affected
+leaf position.
+
+\textbf{T2 --- Log Scrubber / Row Deletion.} An attacker deletes one or
+more event rows to suppress evidence of a specific decision. The monotonic
+per-organization sequence number creates a detectable gap: verification
+will identify missing sequence positions, and the MMR node set will contain
+orphaned nodes at the deleted leaf positions.
+
+\textbf{T3 --- Post-Incident Epoch Modification.} An attacker modifies a
+historical epoch hash to hide evidence of prior tampering. Because each
+epoch hash is computed over the previous epoch hash, any modification to a
+historical epoch invalidates all subsequent epoch hashes.
+
+\textbf{T4 --- Selective History Presentation.} An operator presents only
+a subset of the audit log to an external auditor, claiming it is complete.
+An independent auditor can verify completeness by recomputing the MMR root
+from the presented events and checking it against the claimed epoch hash.
+Any omitted events will produce a root mismatch.
+
+\subsection{Not Protected Against}
+
+\textbf{N1 --- Compromised Application Layer.} LICITRA-MMR commits whatever
+the application layer submits. Pre-execution integrity is the responsibility
+of LICITRA-SENTRY, discussed in Section~\ref{sec:conclusion}.
+
+\textbf{N2 --- Epoch Hash Without Signing.} The current implementation
+computes epoch hashes but does not sign them with a private key. Ed25519
+epoch signing is planned for v0.2 and discussed in Section~\ref{sec:limitations}.
+
+\textbf{N3 --- Availability Attacks.} LICITRA-MMR does not protect against
+denial-of-service attacks against the underlying database or API layer.
+
+\subsection{Trust Assumptions}
+
+The system assumes: (1) SHA-256 is collision-resistant; (2) the database
+storage layer preserves byte-level fidelity of stored values; (3) at least
+one honest party retains a copy of a recent epoch hash against which
+verification can be anchored. This assumption is structurally equivalent
+to Certificate Transparency's reliance on at least one honest log
+monitor~\cite{laurie2013}. No assumption is made about the trustworthiness
+of the operator beyond assumption~(2).
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{System Design}
+
+\subsection{Canonical JSON Specification}
+
+A prerequisite for deterministic verification across independent
+implementations is that identical logical payloads produce identical byte
+sequences. LICITRA-MMR defines a versioned canonical JSON specification
+(CANONICAL\_JSON\_SPEC v1.0) with the rules shown in Table~\ref{tab:canon}.
+
+\begin{table}[h]
+\caption{Canonical JSON Specification v1.0}
+\label{tab:canon}
+\begin{tabular}{ll}
+\toprule
+Property & Value \\
+\midrule
+Character encoding & UTF-8, no BOM \\
+Key ordering & Lexicographic by Unicode code point, recursive \\
+Key-value separator & \texttt{:} (no spaces) \\
+Item separator & \texttt{,} (no spaces) \\
+Non-ASCII characters & Preserved as literal UTF-8 \\
+NaN / Infinity & Prohibited; raises \texttt{ValueError} \\
+Whitespace & None outside string values \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Known limitation.} The specification does not currently normalize
+floating-point values. The integer \texttt{1} and the float \texttt{1.0}
+produce different byte sequences and therefore different leaf hashes.
+Callers must ensure consistent numeric types. Full float normalization per
+RFC~8785~\S3.2.2 is planned for v1.1.
+
+\subsection{MMR Structure and Leaf Hashing}
+
+Each event payload is serialized to canonical JSON bytes and hashed:
+\[
+\texttt{leaf\_hash} = \text{SHA-256}(\text{canonical\_bytes}(\text{payload}))
+\]
+The leaf hash is appended to the epoch's MMR via \texttt{append\_leaf()},
+which adds the leaf node and merges sibling pairs upward. Each merge
+produces one parent node:
+\[
+\texttt{parent\_hash} = \text{SHA-256}(\texttt{left} \| \texttt{right})
+\]
+All nodes are persisted to the \texttt{mmr\_nodes} table in the same
+database transaction as the event record. The MMR root is never stored
+directly; it is recomputed from persisted nodes on demand, ensuring the
+root always reflects actual persisted state.
+
+\subsection{Epoch Chaining}
+
+Events are assigned to epochs by monotonic per-organization sequence
+number. When an epoch reaches \textsc{block\_size} events,
+\texttt{\_finalize\_epoch()} is invoked within the same transaction:
+(1) load all MMR nodes for the epoch; (2) compute MMR root by bagging
+peaks; (3) serialize epoch metadata to canonical JSON; (4) compute epoch
+hash; (5) persist the epoch record. The genesis epoch uses a fixed 32-byte
+zero string as \texttt{prev\_epoch\_hash}.
+
+\subsection{Two-Phase Commit Pipeline}
+
+Agent decisions enter the ledger through a two-phase pipeline:
+
+\textbf{Phase 1 --- Propose.} The agent submits a proposed action as a JSON
+document. The pipeline serializes it, evaluates it against the policy
+engine, and persists a \texttt{StagedEvent} record. If the proposal is
+rejected and \texttt{EMIT\_BLOCKED\_ACTION} is enabled, a
+\texttt{blocked\_action} audit event is immediately committed to the MMR.
+
+\textbf{Phase 2 --- Commit.} An approved staged event is committed via
+\texttt{\_insert\_event()}, which: assigns a monotonic sequence number;
+serializes the payload; computes the leaf hash; appends to the MMR;
+persists all new MMR nodes; persists the event record; and finalizes the
+epoch if \textsc{block\_size} is reached. All operations occur within a
+single database transaction using a single \texttt{db.commit()} at the
+pipeline boundary.
+
+\subsection{Verification}
+
+An external auditor can verify any historical event independently:
+(1)~\textit{Leaf verification}: recompute the leaf hash and compare to the
+stored value; (2)~\textit{Inclusion proof}: verify the MMR proof path
+against the epoch root; (3)~\textit{Epoch chain}: recompute each epoch
+hash from a trusted anchor and compare to stored values.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Implementation}
+
+LICITRA-MMR is implemented in Python~3.11 using FastAPI, SQLAlchemy, and
+PostgreSQL. The implementation is available at
+\url{https://github.com/narendrakumarnutalapati/licitra-mmr-core} under MIT
+license at tagged release v0.1.0-mvp.
+
+\subsection{Key Design Decisions}
+
+\textbf{MMR recomputed from persisted nodes.} The MMR root is never cached
+in application memory. Every MMR operation loads the ordered node list from
+the database, ensuring the root always reflects persisted state and any
+direct database modification is immediately detectable.
+
+\textbf{DEV\_MODE endpoint gating.} Tamper and reset endpoints return
+HTTP~403 unless \texttt{DEV\_MODE=true} is explicitly set, with
+\texttt{false} as the default. The \texttt{.env} file is excluded from
+version control.
+
+\textbf{Atomic transaction boundary.} The commit pipeline uses a single
+\texttt{db.commit()} at the pipeline boundary. All intermediate writes use
+\texttt{db.flush()} to assign database IDs without committing, ensuring any
+failure results in a full rollback.
+
+\textbf{SHA-256 via Python hashlib.} All cryptographic operations use
+Python's \texttt{hashlib.sha256}, which wraps OpenSSL. SHA-256 is
+FIPS~180-4 compliant and accepted by all major compliance frameworks,
+making it preferable to BLAKE3 for compliance-oriented deployments despite
+BLAKE3's superior throughput.
+
+\subsection{Test Suite and Evidence Bundles}
+
+The implementation includes 11 passing tests covering event proposal and
+commitment, MMR node persistence, epoch finalization and hash chaining,
+tamper detection, row deletion detection, and inclusion proof verification.
+Five reproducible evidence scenarios are provided as JSON bundles:
+S01 (normal commit), S02 (leaf tamper), S03 (epoch tamper), S04 (row
+deletion), and S05 (cross-epoch verification).
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Competitive Analysis}
+
+Table~\ref{tab:comparison} compares LICITRA-MMR against four related systems.
+
+\begin{table*}[t]
+\caption{Comparison of tamper-evident audit systems for agentic AI}
+\label{tab:comparison}
+\begin{tabular}{lcccc}
+\toprule
+Feature & LICITRA-MMR & immudb & CT Logs & Oktsec \\
+\midrule
+Data structure & MMR & Merkle tree & Merkle tree & Hash chain \\
+Inclusion proof & $O(\log n)$ & $O(\log n)$ & $O(\log n)$ & None \\
+Epoch anchoring & \checkmark & $\times$ & $\times$ & $\times$ \\
+Per-org ledger & \checkmark & Partial & $\times$ & \checkmark \\
+Pre-execution gate & $\times$ (SENTRY) & $\times$ & $\times$ & $\times$ \\
+Explicit AI audit design & \checkmark & $\times$ & $\times$ & Partial \\
+Canonical JSON spec & \checkmark versioned & $\times$ & $\times$ & $\times$ \\
+Independent verification & \checkmark & \checkmark & \checkmark & $\times$ \\
+License & MIT & Apache-2.0 & N/A & GPL-3.0 \\
+Regulatory framing & EU AI Act, CO AI Act & General & PKI/TLS & None \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\textbf{immudb}~\cite{immudb} is a general-purpose tamper-evident database
+using a Merkle tree over a linear log. It provides inclusion proofs and
+independent verification, making it the closest architectural peer. For use
+cases requiring only tamper-evident storage without agentic governance
+semantics, immudb is a mature alternative. LICITRA-MMR is distinguished by
+its governance architecture: epoch anchoring, canonical JSON specification,
+and integration with a pre-execution authorization layer.
+
+\textbf{Certificate Transparency logs}~\cite{laurie2013} provide a globally
+auditable append-only log for TLS certificates with gossip-based consistency
+across independent operators. CT logs solve a different problem: proving
+certificate existence in a publicly auditable multi-operator log. They
+require external operators, have no per-organization namespacing, and are
+not designed for high-frequency per-org event streams.
+
+\textbf{Oktsec}~\cite{oktsec} provides agent identity verification and
+message integrity using Ed25519 signatures and SHA-256 hash chains, covering
+multiple OWASP Agentic Top~10 threat categories. LICITRA-MMR addresses a
+complementary layer: epoch-anchored, independently verifiable commitment of
+authorized agent decisions, rather than message-level integrity. The key
+architectural distinction is that Oktsec's hash chain cannot produce
+inclusion proofs without replaying the full chain; LICITRA's MMR enables
+$O(\log n)$ verification of any single event.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Theoretical Performance Evaluation}
+
+All estimates assume Python~3.11 \texttt{hashlib.sha256} on an Intel
+x86-64 processor (3.2~GHz, 32~GB RAM), with SHA-256 latency of
+approximately 500~ns per call as measured via \texttt{timeit}
+microbenchmark. Typical agent event payloads are assumed to be
+approximately 200~bytes. Database I/O latency dominates the commit path;
+cryptographic overhead is negligible in all scenarios.
+
+\subsection{Inclusion Proof Path Length}
+
+Table~\ref{tab:proof} shows proof path lengths at various epoch sizes. At
+the default block size of 1,000, an inclusion proof requires 14 SHA-256
+operations and occupies 462~bytes in binary encoding.
+
+\begin{table}[h]
+\caption{MMR inclusion proof path length by epoch size}
+\label{tab:proof}
+\begin{tabular}{rrrr}
+\toprule
+Epoch size & Proof path & MMR nodes & Proof size \\
+(events) & (hashes) & & (binary) \\
+\midrule
+100   & 8  & 197    & 264~B \\
+500   & 13 & 994    & 429~B \\
+1,000 & 14 & 1,994  & 462~B \\
+2,000 & 15 & 3,994  & 495~B \\
+10,000 & 17 & 19,995 & 561~B \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Verification Cost at 1 Million Events}
+
+With block size 1,000, one million events produce 1,000 epochs.
+\textit{Epoch chain verification} requires 2 SHA-256 operations per epoch
+(2,000 total), completing in approximately 1~ms. \textit{Per-event inclusion
+proof} requires 14 SHA-256 operations and completes in approximately 7~$\mu$s
+per event. \textit{Full leaf rehash} of all 1 million events requires
+approximately 2~seconds at 2~$\mu$s per event. \textit{Sample verification}
+of 100 randomly selected events requires approximately 0.9~ms.
+
+\subsection{Commit Overhead}
+
+The amortized cryptographic overhead per commit is approximately 6 SHA-256
+operations ($\approx3~\mu$s). The dominant commit cost is database I/O:
+three write operations per commit.
+
+\subsection{Storage at Scale}
+
+At 1 million events with block size 1,000, the estimated storage footprint
+is approximately 564~MB: MMR nodes~$\approx$217~MB (1,994,000 node rows),
+event rows~$\approx$347~MB (1,000,000 rows at~$\approx$364~bytes each),
+epoch rows~$<1$~MB. Storage scales linearly with event count. The MMR node
+overhead is approximately $2\times$ the leaf count, consistent with the
+asymptotic minimum for append-only binary hash tree constructions.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Architectural Non-Goals}
+
+The following properties are explicitly outside the scope of LICITRA-MMR.
+
+\textbf{Not a consensus system.} There is one writer and one ledger per
+organization. Consistency is enforced by database transaction semantics,
+not a consensus protocol.
+
+\textbf{Not a blockchain.} The epoch chain is structurally similar to a
+blockchain header chain but is not a blockchain. There is no proof of work,
+proof of stake, token, peer-to-peer network, or distributed ledger.
+
+\textbf{Not Byzantine fault tolerant.} The system assumes the database
+storage layer faithfully preserves byte-level fidelity of stored values.
+It does not protect against a Byzantine storage layer.
+
+\textbf{Not preventing application-layer falsification.} LICITRA-MMR
+commits whatever the application layer submits. Pre-execution integrity is
+the scope of LICITRA-SENTRY, not LICITRA-MMR.
+
+\textbf{Not availability-protecting.} Availability is the responsibility of
+the deployment infrastructure.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Limitations and Future Work}
+\label{sec:limitations}
+
+\subsection{Float Normalization Gap}
+
+The canonical JSON specification does not normalize floating-point values.
+The integer \texttt{1} and the float \texttt{1.0} produce different byte
+sequences and different leaf hashes. For the primary use case of agent
+decision logging, this is unlikely to cause verification failures in
+practice. Full float normalization per RFC~8785~\S3.2.2 is planned for
+CANONICAL\_JSON\_SPEC~v1.1.
+
+\subsection{Unsigned Epoch Roots}
+
+The current implementation computes epoch hashes but does not sign them
+with a private key. An attacker who controls both the database and the
+application server can in principle reconstruct a consistent but false
+history. Ed25519 epoch signing is planned for v0.2. The epoch record
+schema reserves a \texttt{signature} field for this purpose.
+
+\subsection{Single-Operator Trust Model}
+
+LICITRA-MMR is designed for single-operator deployments. Multi-party
+witnessing --- where multiple independent operators each hold a copy of the
+current epoch hash --- is a direction for future work, analogous to the
+gossip protocol in Certificate Transparency~\cite{laurie2013}.
+
+\subsection{Pre-Execution Integrity}
+
+LICITRA-MMR records what was committed. It does not guarantee that what was
+committed accurately reflects what the agent was authorized to do.
+Pre-execution integrity is the scope of LICITRA-SENTRY.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Related Work}
+
+\textbf{Merkle Mountain Ranges.} MMRs were introduced by Peter
+Todd~\cite{todd2013} and have been adopted in blockchain systems including
+Grin and Beam. The formal optimality of the MMR for append-only
+accumulators was established by Bonneau et al.~\cite{bonneau2025}.
+LICITRA-MMR applies the MMR structure to per-organization agentic AI audit
+logs, a context not previously addressed in the literature.
+
+\textbf{Certificate Transparency.} Laurie et al.~\cite{laurie2013}
+introduced CT logs for publicly auditing TLS certificate issuance.
+LICITRA-MMR shares the append-only authenticated structure but differs in
+trust model, scope, and operational requirements.
+
+\textbf{immudb.} Codenotary's immudb~\cite{immudb} provides a
+tamper-evident database using a Merkle tree over an append-only log. It is
+the closest architectural peer; distinctions are described in Section~6.
+
+\textbf{Oktsec.} The Oktsec framework~\cite{oktsec} provides agent identity
+verification and message integrity. LICITRA-MMR addresses a complementary
+layer at the authorization and audit level.
+
+\textbf{NIST AI Risk Management Framework.} The NIST AI RMF~\cite{nistai}
+provides governance guidance including auditability requirements.
+LICITRA-MMR provides a technical implementation of that requirement.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have presented LICITRA-MMR, an open-source cryptographic ledger primitive
+for agentic AI runtime accountability. The system combines a Merkle Mountain
+Range with per-organization epoch anchoring, a versioned canonical JSON
+specification, and an atomic two-phase commit pipeline to provide forensic
+integrity guarantees that mutable logging infrastructure cannot offer.
+
+The three core contributions --- the canonical specification, the
+MMR-based epoch-anchored ledger, and the atomic commit pipeline --- address
+the gap between what emerging AI regulation implies (post-incident
+reconstructability with sufficient integrity for audit) and what most
+production agentic AI stacks currently provide (operator-controlled mutable
+logs).
+
+LICITRA-MMR is the foundational layer of the broader LICITRA cryptographic
+governance stack. The next layer, LICITRA-SENTRY, adds a zero-trust control
+plane with pre-execution semantic contracts, agent identity verification,
+content inspection, and Chain of Intent authorization.
+
+\subsection{Deployment Considerations}
+
+Organizations deploying LICITRA-MMR should consider: (1)~\textit{Epoch hash
+anchoring} --- store at least one epoch hash off-site via a notarization
+service, timestamping service, or publication to a public ledger, to
+prevent an operator from reconstructing a consistent false history; (2)~%
+\textit{Key management preparation} --- establish KMS or HSM infrastructure
+in advance of the v0.2 signing upgrade; (3)~\textit{Backup and retention}
+--- the MMR node table grows at approximately $2\times$ the event count;
+(4)~\textit{Regulatory export} --- use the JSON evidence bundle format from
+the \texttt{licitra-mmr-evidence} repository for regulatory submissions.
+
+\textbf{Reproducibility.} All code, test suites, and evidence bundles are
+available at \url{https://github.com/narendrakumarnutalapati/licitra-mmr-core}.
+The tagged release v0.1.0-mvp and all evidence bundles are permanently
+archived at \url{https://doi.org/10.5281/zenodo.18796529}.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\bibliographystyle{ACM-Reference-Format}
+\begin{thebibliography}{9}
+
+\bibitem{todd2013}
+P.~Todd.
+\newblock Merkle Mountain Ranges.
+\newblock OpenTimestamps, 2013.
+\newblock \url{https://github.com/opentimestamps/opentimestamps-server/blob/master/doc/merkle-mountain-range.md}
+
+\bibitem{laurie2013}
+B.~Laurie, A.~Langley, and E.~Kasper.
+\newblock Certificate Transparency.
+\newblock RFC~6962, Internet Engineering Task Force, 2013.
+\newblock \url{https://www.rfc-editor.org/rfc/rfc6962}
+
+\bibitem{bonneau2025}
+J.~Bonneau, J.~Chen, M.~Christ, and I.~Karantaidou.
+\newblock Merkle Mountain Ranges are Optimal: On Witness Update Frequency for
+  Cryptographic Accumulators.
+\newblock In \textit{Advances in Cryptology -- CRYPTO~2025}, LNCS vol.~16001,
+  Springer, 2025.
+\newblock \url{https://eprint.iacr.org/2025/234}
+
+\bibitem{immudb}
+Codenotary.
+\newblock immudb: Immutable Database.
+\newblock \url{https://immudb.io}
+
+\bibitem{oktsec}
+Oktsec.
+\newblock Agent Security Framework (v0.1).
+\newblock \url{https://github.com/oktsec/oktsec}
+\newblock Accessed: February 2026.
+
+\bibitem{nistai}
+National Institute of Standards and Technology.
+\newblock Artificial Intelligence Risk Management Framework (AI~RMF~1.0).
+\newblock \url{https://doi.org/10.6028/NIST.AI.100-1}, 2023.
+
+\bibitem{euaiact}
+European Parliament.
+\newblock Regulation (EU) 2024/1689 on Artificial Intelligence (EU AI Act).
+\newblock Official Journal of the European Union, 2024.
+
+\bibitem{coloradoai}
+Colorado General Assembly.
+\newblock SB~24-205: Colorado Artificial Intelligence Act.
+\newblock Effective June~30, 2026.
+\newblock \url{https://leg.colorado.gov/bills/sb24-205}
+
+\end{thebibliography}
+
+\end{document}
