@@ -190,8 +190,10 @@ LICITRA-MMR partitions the event stream into fixed-size epochs of
 record is finalized containing:
 
 \begin{lstlisting}
-epoch_hash = SHA-256(prev_epoch_hash || mmr_root
-                     || SHA-256(metadata))
+epoch_hash = SHA-256(
+  prev_epoch_hash
+  || mmr_root
+  || SHA-256(metadata))
 \end{lstlisting}
 
 where \texttt{prev\_epoch\_hash} is the hash of the preceding epoch (or a
@@ -299,11 +301,11 @@ system guarantees under standard cryptographic assumptions.
 Let $L = (e_1, e_2, \ldots, e_n)$ be the ordered sequence of committed
 events for an organization within an epoch. Define the epoch hash as:
 
-\[
-H_{\text{epoch}} = \text{SHA-256}(\texttt{prev\_epoch\_hash}
-  \;\|\; \text{MMR\_root}(L)
-  \;\|\; \text{SHA-256}(\texttt{metadata}))
-\]
+\begin{align*}
+H_{\text{epoch}} &= \text{SHA-256}(\texttt{prev\_epoch\_hash} \\
+  &\quad\|\; \text{MMR\_root}(L) \\
+  &\quad\|\; \text{SHA-256}(\texttt{metadata}))
+\end{align*}
 
 Under the assumption that SHA-256 is collision-resistant, any adversary
 who modifies, deletes, reorders, or inserts an event in $L$ after
@@ -351,7 +353,7 @@ sequences. LICITRA-MMR defines a versioned canonical JSON specification
 \begin{table}[ht]
 \caption{Canonical JSON Specification v1.0}
 \label{tab:canon}
-\begin{tabular}{ll}
+\begin{tabular}{lp{4.5cm}}
 \toprule
 Property & Value \\
 \midrule
