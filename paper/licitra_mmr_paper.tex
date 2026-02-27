@@ -246,6 +246,59 @@ to Certificate Transparency's reliance on at least one honest log
 monitor~\cite{laurie2013}. No assumption is made about the trustworthiness
 of the operator beyond assumption~(2).
 
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Security Properties}
+\label{sec:security}
+
+We formalize the core integrity guarantees provided by LICITRA-MMR.
+These are not full proofs; they are precise statements of what the
+system guarantees under standard cryptographic assumptions.
+
+\subsection{Append-Only Integrity}
+
+Let $L = (e_1, e_2, \ldots, e_n)$ be the ordered sequence of committed
+events for an organization within an epoch. Define the epoch hash as:
+
+\[
+H_{\text{epoch}} = \text{SHA-256}(\texttt{prev\_epoch\_hash}
+  \;\|\; \text{MMR\_root}(L)
+  \;\|\; \text{SHA-256}(\texttt{metadata}))
+\]
+
+Under the assumption that SHA-256 is collision-resistant, any adversary
+who modifies, deletes, reorders, or inserts an event in $L$ after
+$H_{\text{epoch}}$ has been externally anchored must produce either a
+second preimage for SHA-256 or a collision in the MMR construction.
+Therefore, retroactive modification of committed history without
+detection is computationally infeasible under standard hash function
+assumptions.
+
+\subsection{Inclusion Soundness}
+
+For any event $e_i$ committed in epoch $k$, the inclusion proof
+$\pi_i$ produced by the MMR satisfies:
+
+\[
+\text{Verify}(e_i,\; \pi_i,\; \text{MMR\_root}_k) = \texttt{true}
+\]
+
+if and only if $e_i$ was included in the committed set $L_k$ at the
+time of epoch finalization. Any modification to $e_i$ or to the node
+path represented in $\pi_i$ requires either: (1) a collision in
+SHA-256, or (2) modification of the persisted node set — both of which
+are detectable under the append-only integrity model above.
+
+\subsection{Trust Model Limitation}
+
+These guarantees are relative. If an adversary controls both the
+database and all external epoch anchors, they can reconstruct a
+consistent but false history. LICITRA-MMR therefore provides
+tamper-evidence relative to at least one honest anchor holder,
+consistent with the trust assumption stated in Section~3.3.
+Epoch signing (planned for v0.2) will strengthen this guarantee
+by binding each epoch to a key holder independent of the database.
+
 %% ─────────────────────────────────────────────────────────────────────────────
 \section{System Design}
 
