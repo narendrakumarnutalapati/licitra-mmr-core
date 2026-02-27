@@ -1,6 +1,8 @@
 \documentclass[sigconf,natbib=false]{acmart}
 
 \usepackage{booktabs}
+\setlength{\headheight}{15.5pt}
+\setlength{\emergencystretch}{3em}
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{hyperref}
@@ -13,15 +15,18 @@
   backgroundcolor=\color{gray!10}
 }
 
-%%% arXiv preprint mode — remove ACM copyright block
+%%% arXiv preprint mode — suppress all ACM copyright/conference output
 \setcopyright{none}
+\settopmatter{printacmref=false, printccs=true, printfolios=true}
+\renewcommand\footnotetextcopyrightpermission[1]{}
 \acmDOI{}
 \acmISBN{}
-\acmConference{}
-\acmYear{2026}
-\copyrightyear{2026}
+\acmConference[LICITRA-MMR]{}{}{}
+\acmYear{}
+\copyrightyear{}
 
 \begin{document}
+\sloppy
 
 \title{LICITRA-MMR: A Merkle Mountain Range Ledger Primitive for\\
 Cryptographic Runtime Accountability in Agentic AI Systems}
@@ -29,6 +34,9 @@ Cryptographic Runtime Accountability in Agentic AI Systems}
 \author{Narendra Kumar Nutalapati}
 \affiliation{%
   \institution{Independent Researcher, LICITRA Research Program}
+  \city{Portland}
+  \state{Oregon}
+  \country{USA}
 }
 \email{narendrakumar.nutalapati@gmail.com}
 
@@ -55,7 +63,38 @@ a foundational cryptographic audit layer for agentic AI governance systems.
 \keywords{Merkle Mountain Range, agentic AI, cryptographic audit, runtime
 integrity, tamper-evident logging, AI governance}
 
+
+\begin{CCSXML}
+<ccs2012>
+<concept>
+<concept_id>10002978.10002986.10002990</concept_id>
+<concept_desc>Security and privacy~Digital signatures</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+<concept>
+<concept_id>10002978.10002986.10003006</concept_id>
+<concept_desc>Security and privacy~Tamper-proof and tamper-evident designs</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+<concept>
+<concept_id>10010520.10010521.10010537</concept_id>
+<concept_desc>Computer systems organization~Dependable and fault-tolerant systems and networks</concept_desc>
+<concept_significance>300</concept_significance>
+</concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Security and privacy~Digital signatures}
+\ccsdesc[500]{Security and privacy~Tamper-proof and tamper-evident designs}
+\ccsdesc[300]{Computer systems organization~Dependable and fault-tolerant systems and networks}
+
 \maketitle
+\fancyhead{}
+\fancyhead[LE,RO]{\thepage}
+\fancyhead[RE]{\itshape Narendra Kumar Nutalapati}
+\fancyhead[LO]{\itshape LICITRA-MMR}
+\fancyfoot{}
+
 
 %% ─────────────────────────────────────────────────────────────────────────────
 \section{Introduction}
@@ -309,7 +348,7 @@ implementations is that identical logical payloads produce identical byte
 sequences. LICITRA-MMR defines a versioned canonical JSON specification
 (CANONICAL\_JSON\_SPEC v1.0) with the rules shown in Table~\ref{tab:canon}.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{Canonical JSON Specification v1.0}
 \label{tab:canon}
 \begin{tabular}{ll}
@@ -492,7 +531,7 @@ Table~\ref{tab:proof} shows proof path lengths at various epoch sizes. At
 the default block size of 1,000, an inclusion proof requires 14 SHA-256
 operations and occupies 462~bytes in binary encoding.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{MMR inclusion proof path length by epoch size}
 \label{tab:proof}
 \begin{tabular}{rrrr}
