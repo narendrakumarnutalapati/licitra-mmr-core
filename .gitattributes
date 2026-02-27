@@ -1,0 +1,2 @@
+*.ps1 linguist-detectable=false
+*.ps1 linguist-documentation=true
