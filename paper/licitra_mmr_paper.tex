@@ -48,7 +48,10 @@ stronger guarantee than operational logs alone provide. Existing logging
 approaches --- including mutable database logs, hash chains, and
 general-purpose tamper-evident stores not tailored for agentic governance
 --- provide observability but do not explicitly address independently
-verifiable runtime decision chains. We present LICITRA-MMR, an open-source
+verifiable runtime decision chains; a property not satisfied by existing
+hash-chain or standard Merkle-tree-based audit stores, which either lack
+$O(\log n)$ inclusion proofs without full replay or require modifying
+previously committed nodes on insertion. We present LICITRA-MMR, an open-source
 ledger primitive that combines a Merkle Mountain Range (MMR) data structure
 with per-organization epoch anchoring, a versioned canonical JSON
 specification, and an atomic two-phase commit pipeline. At a block size of
@@ -67,8 +70,8 @@ integrity, tamper-evident logging, AI governance}
 \begin{CCSXML}
 <ccs2012>
 <concept>
-<concept_id>10002978.10002986.10002990</concept_id>
-<concept_desc>Security and privacy~Digital signatures</concept_desc>
+<concept_id>10002978.10002986.10002988</concept_id>
+<concept_desc>Security and privacy~Hash functions and message authentication codes</concept_desc>
 <concept_significance>500</concept_significance>
 </concept>
 <concept>
@@ -84,7 +87,7 @@ integrity, tamper-evident logging, AI governance}
 </ccs2012>
 \end{CCSXML}
 
-\ccsdesc[500]{Security and privacy~Digital signatures}
+\ccsdesc[500]{Security and privacy~Hash functions and message authentication codes}
 \ccsdesc[500]{Security and privacy~Tamper-proof and tamper-evident designs}
 \ccsdesc[300]{Computer systems organization~Dependable and fault-tolerant systems and networks}
 
@@ -176,10 +179,14 @@ subtree peak, plus the remaining peaks, enabling logarithmic verification
 without access to the full node set.
 
 At \textsc{block\_size}~$= 1{,}000$ (our default epoch size), the MMR
-contains 1,994 nodes and produces inclusion proofs requiring exactly 14
-hash operations. This compares favorably to a standard Merkle tree over
-the same leaf count, which requires $\lceil\log_2(1000)\rceil = 10$ hashes
-per proof path but requires updating internal nodes on insertion. The
+contains 1,994 nodes and produces inclusion proofs requiring 14
+hash operations. A standard balanced Merkle tree over the same leaf count
+requires $\lceil\log_2(1000)\rceil = 10$ hashes per proof path but incurs
+$O(\log n)$ internal node \emph{rewrites} on each insertion, since
+sibling hashes along the rightmost path must be updated. The MMR trades a
+slightly longer proof path for fully append-only insertion semantics: no
+previously committed node is ever modified, making it strictly preferable
+for tamper-evident audit logs where insertion integrity is paramount. The
 formal optimality of the MMR for append-only accumulators was established
 by Bonneau et al.~\cite{bonneau2025}.
 
@@ -240,6 +247,12 @@ against.
 
 \subsection{Protected Against}
 
+\textit{Note: all tamper-evidence guarantees below are relative to at least
+one honest anchor holder retaining a copy of a recent epoch hash --- a
+trust assumption stated explicitly in Section~\ref{sec:trust} and
+structurally equivalent to Certificate Transparency's honest log monitor
+assumption.}
+
 \textbf{T1 --- Insider / Database Administrator.} An attacker with direct
 write access to the database attempts to modify the \texttt{canonical\_json}
 field of a committed event. The leaf hash stored separately in the
@@ -278,6 +291,7 @@ epoch signing is planned for v0.2 and discussed in Section~\ref{sec:limitations}
 denial-of-service attacks against the underlying database or API layer.
 
 \subsection{Trust Assumptions}
+\label{sec:trust}
 
 The system assumes: (1) SHA-256 is collision-resistant; (2) the database
 storage layer preserves byte-level fidelity of stored values; (3) at least
@@ -497,9 +511,17 @@ Regulatory framing & EU AI Act, CO AI Act & General & PKI/TLS & None \\
 using a Merkle tree over a linear log. It provides inclusion proofs and
 independent verification, making it the closest architectural peer. For use
 cases requiring only tamper-evident storage without agentic governance
-semantics, immudb is a mature alternative. LICITRA-MMR is distinguished by
-its governance architecture: epoch anchoring, canonical JSON specification,
-and integration with a pre-execution authorization layer.
+semantics, immudb is a mature alternative. However, immudb cannot be used
+as-is for agentic governance for three reasons: (1)~it has no per-organization
+epoch anchoring --- the entire database shares a single Merkle root, making
+per-tenant forensic isolation difficult; (2)~it provides no canonical
+serialization specification, meaning cross-implementation verification
+requires out-of-band agreement on payload encoding; and (3)~it has no
+integration path for pre-execution authorization semantics --- it records
+whatever the application submits with no policy evaluation layer.
+LICITRA-MMR is distinguished by its governance architecture: per-organization
+epoch anchoring, versioned canonical JSON specification, and a designed
+integration point for the LICITRA-SENTRY pre-execution control plane.
 
 \textbf{Certificate Transparency logs}~\cite{laurie2013} provide a globally
 auditable append-only log for TLS certificates with gossip-based consistency
@@ -520,12 +542,20 @@ $O(\log n)$ verification of any single event.
 %% ─────────────────────────────────────────────────────────────────────────────
 \section{Theoretical Performance Evaluation}
 
-All estimates assume Python~3.11 \texttt{hashlib.sha256} on an Intel
-x86-64 processor (3.2~GHz, 32~GB RAM), with SHA-256 latency of
-approximately 500~ns per call as measured via \texttt{timeit}
-microbenchmark. Typical agent event payloads are assumed to be
-approximately 200~bytes. Database I/O latency dominates the commit path;
-cryptographic overhead is negligible in all scenarios.
+The figures in this section are \textbf{back-of-envelope analytical
+estimates}, not measured benchmarks. They are derived from first principles
+using known SHA-256 throughput characteristics and asymptotic node counts.
+No profiling harness, database I/O, or network overhead is included.
+Actual performance will vary depending on hardware, PostgreSQL
+configuration, connection pool behaviour, payload size, and cache warmth.
+
+\textit{Estimation basis:} Python~3.11 \texttt{hashlib.sha256} wrapping
+OpenSSL on a commodity x86-64 processor; SHA-256 throughput assumed at
+approximately 500~ns per call based on published OpenSSL benchmarks for
+single-block inputs. Payload size assumed at approximately 200~bytes.
+Database I/O latency dominates the commit path; cryptographic overhead is
+analytically negligible in all scenarios. All numbers should be treated as
+order-of-magnitude estimates pending a formal benchmark suite.
 
 \subsection{Inclusion Proof Path Length}
 
@@ -574,6 +604,11 @@ event rows~$\approx$347~MB (1,000,000 rows at~$\approx$364~bytes each),
 epoch rows~$<1$~MB. Storage scales linearly with event count. The MMR node
 overhead is approximately $2\times$ the leaf count, consistent with the
 asymptotic minimum for append-only binary hash tree constructions.
+
+A formal microbenchmark suite measuring end-to-end commit latency, inclusion
+proof generation, and epoch chain verification against a live PostgreSQL
+instance --- including p50/p95 distributions, cold vs.\ warm cache
+conditions, and database I/O breakdown --- is planned for v0.2.
 
 %% ─────────────────────────────────────────────────────────────────────────────
 \section{Architectural Non-Goals}
@@ -630,8 +665,20 @@ gossip protocol in Certificate Transparency~\cite{laurie2013}.
 \subsection{Pre-Execution Integrity}
 
 LICITRA-MMR records what was committed. It does not guarantee that what was
-committed accurately reflects what the agent was authorized to do.
-Pre-execution integrity is the scope of LICITRA-SENTRY.
+committed accurately reflects what the agent was authorized to do: a
+sufficiently privileged application layer could submit fabricated or
+policy-bypassing events that the ledger would commit faithfully.
+
+Closing this gap is the scope of LICITRA-SENTRY, the planned next layer of
+the LICITRA governance stack. LICITRA-SENTRY intercepts agent actions
+before they reach the commit pipeline, evaluates them against declarative
+per-agent semantic contracts, and binds the authorization decision ---
+approved or blocked --- to the MMR record in the same transaction. This
+\emph{commitment before execution} property means the audit record contains
+not just what the agent did, but cryptographic evidence that the action was
+evaluated against policy at the moment of execution. LICITRA-SENTRY is
+planned for v0.2; the present paper establishes the ledger primitive on
+which that control layer depends.
 
 %% ─────────────────────────────────────────────────────────────────────────────
 \section{Related Work}
@@ -659,6 +706,21 @@ layer at the authorization and audit level.
 \textbf{NIST AI Risk Management Framework.} The NIST AI RMF~\cite{nistai}
 provides governance guidance including auditability requirements.
 LICITRA-MMR provides a technical implementation of that requirement.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Artifact and Reproducibility}
+\label{sec:artifacts}
+
+All source code, test suites, and evidence bundles are publicly available.
+
+\textbf{Repository:} \url{https://github.com/narendrakumarnutalapati/licitra-mmr-core}\\
+\textbf{Tagged release:} \texttt{v0.1.0-mvp} (commit \texttt{70ec6e4})\\
+\textbf{Zenodo archive (DOI):} \url{https://doi.org/10.5281/zenodo.18796529}\\
+\textbf{Runtime:} Python~3.11, PostgreSQL~15, FastAPI, SQLAlchemy\\
+\textbf{Test command:} \texttt{pytest tests/ -v} (11/11 passing)\\
+\textbf{Evidence bundles:} Five reproducible JSON scenarios (S01--S05)
+covering normal commit, leaf tamper, epoch tamper, row deletion, and
+cross-epoch verification, included in the repository root.
 
 %% ─────────────────────────────────────────────────────────────────────────────
 \section{Conclusion}
@@ -720,8 +782,9 @@ J.~Bonneau, J.~Chen, M.~Christ, and I.~Karantaidou.
 \newblock Merkle Mountain Ranges are Optimal: On Witness Update Frequency for
   Cryptographic Accumulators.
 \newblock In \textit{Advances in Cryptology -- CRYPTO~2025}, LNCS vol.~16001,
-  Springer, 2025.
-\newblock \url{https://eprint.iacr.org/2025/234}
+  pp.~170--202, Springer, 2025.
+\newblock \doi{10.1007/978-3-032-01878-6\_6}
+\newblock ePrint: \url{https://eprint.iacr.org/2025/234}
 
 \bibitem{immudb}
 Codenotary.
