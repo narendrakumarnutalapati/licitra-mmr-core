@@ -20,16 +20,12 @@ from typing import List, Tuple
 
 def _height_at(pos: int) -> int:
     """Return the height of the node at MMR position pos (0-indexed)."""
-    pos += 1  # 1-indexed internally
-    h = 0
-    while pos & 1 == 0:
-        pos >>= 1
-        h += 1
-    # count trailing ones in binary
-    while pos & 1 == 1:
-        pos >>= 1
-        h += 1
-    return h - 1
+    pos += 1
+    while True:
+        bits = pos.bit_length()
+        if pos == (1 << bits) - 1:
+            return bits - 1
+        pos = pos - ((1 << (bits - 1)) - 1)
 
 
 def _all_ones(n: int) -> bool:
@@ -43,21 +39,26 @@ def _jump_left(pos: int) -> int:
 
 
 def peaks(mmr_size: int) -> List[int]:
-    """Return 0-indexed positions of all current peaks."""
-    if mmr_size == 0:
+    """Return 0-indexed positions of all current peaks, left to right."""
+    if mmr_size <= 0:
         return []
+
     result = []
-    pos = mmr_size - 1
-    while pos >= 0:
-        if _all_ones(pos + 1):
-            result.append(pos)
-            if pos == 0:
-                break
-            pos = pos - 1
-        else:
-            pos = _jump_left(pos + 1) - 2
-        if pos < 0:
-            break
+    pos = 0
+    remaining = mmr_size
+
+    while remaining > 0:
+        h = 0
+        while (1 << (h + 1)) - 1 <= remaining:
+            h += 1
+        h -= 1
+
+        peak_size = (1 << (h + 1)) - 1
+        result.append(pos + peak_size - 1)
+
+        pos += peak_size
+        remaining -= peak_size
+
     return result
 
 
@@ -100,18 +101,19 @@ def append_leaf(
     new_nodes.append((leaf_pos, leaf_hash))
 
     # merge upward while the last two nodes are siblings at the same height
+    # merge upward while left sibling subtree of same height exists
     current_pos = leaf_pos
     while True:
         height = _height_at(current_pos)
-        # sibling is to the left at current_pos - 2^(height+1) + 1... use simpler rule:
-        # two nodes merge when current_pos's left sibling exists
-        if current_pos < 1:
+        left_sib_pos = current_pos - ((1 << (height + 1)) - 1)
+
+        if left_sib_pos < 0:
             break
-        left_sib_pos = current_pos - 1
         if _height_at(left_sib_pos) != height:
             break
+
         parent_hash = hash_node(nodes[left_sib_pos], nodes[current_pos])
-        parent_pos  = len(nodes)
+        parent_pos = len(nodes)
         nodes.append(parent_hash)
         new_nodes.append((parent_pos, parent_hash))
         current_pos = parent_pos
@@ -136,37 +138,54 @@ def get_proof(
 ) -> List[dict]:
     """
     Return inclusion proof path for leaf at leaf_pos.
-    Each step: {hash: str, side: "left"|"right"}
-    Verifier reconstructs root by hashing sibling pairs bottom-up.
+    Each step: {hash: str, side: "left"|"right"}.
+
+    First climb within the local mountain to its peak.
+    Then append peak-bagging context so the proof reaches the global MMR root.
     """
     proof = []
-    pos   = leaf_pos
+    pos = leaf_pos
     mmr_size = len(nodes)
 
+    # 1) climb from leaf to its mountain peak
     while True:
         height = _height_at(pos)
-        # determine if this node is a left or right child
-        # right child: pos is odd height+1 jump
         step = (1 << (height + 1)) - 1
-        # left child position of parent
-        parent_left = pos - step
-        # if pos == parent_left, it is the left child; right child = pos + step - 1... 
-        # simpler: check if sibling is to the right or left
-        sib_pos = pos - 1 if (pos > 0 and _height_at(pos - 1) == height) else pos + (1 << (height + 1)) - 1
 
-        if sib_pos < 0 or sib_pos >= mmr_size:
-            break
+        right_sib = pos + step
+        if right_sib < mmr_size and _height_at(right_sib) == height:
+            proof.append({"hash": nodes[right_sib], "side": "right"})
+            parent_pos = right_sib + 1
+            if parent_pos >= mmr_size:
+                pos = right_sib
+                break
+            pos = parent_pos
+            continue
 
-        if sib_pos < pos:
-            proof.append({"hash": nodes[sib_pos], "side": "left"})
+        left_sib = pos - step
+        if left_sib >= 0 and _height_at(left_sib) == height:
+            proof.append({"hash": nodes[left_sib], "side": "left"})
             parent_pos = pos + 1
-        else:
-            proof.append({"hash": nodes[sib_pos], "side": "right"})
-            parent_pos = sib_pos + 1
+            if parent_pos >= mmr_size:
+                break
+            pos = parent_pos
+            continue
 
-        if parent_pos >= mmr_size:
-            break
-        pos = parent_pos
+        break
+
+    # 2) add peak-bagging context to reach the final MMR root
+    peak_positions = peaks(mmr_size)
+    if pos in peak_positions:
+        peak_index = peak_positions.index(pos)
+
+        # bag all peaks to the right into one sibling hash
+        if peak_index + 1 < len(peak_positions):
+            right_hash = bag_peaks([nodes[p] for p in peak_positions[peak_index + 1:]])
+            proof.append({"hash": right_hash, "side": "right"})
+
+        # then fold in all peaks to the left, nearest-to-farthest, as left siblings
+        for p in reversed(peak_positions[:peak_index]):
+            proof.append({"hash": nodes[p], "side": "left"})
 
     return proof
 
