@@ -1,5 +1,5 @@
-﻿. D:\AI\licitra-mmr-core\tests\_common.ps1
-Test-Header "T05 — Verification"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Test-Header "T05 � Verification"
 Reset-Org "t05a"; Reset-Org "t05b"; Reset-Org "t05c"
 
 Write-Host "  [CASE] Clean verify on 1000 events" -ForegroundColor White

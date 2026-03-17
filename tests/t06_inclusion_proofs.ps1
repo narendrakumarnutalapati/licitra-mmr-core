@@ -1,5 +1,5 @@
-﻿. D:\AI\licitra-mmr-core\tests\_common.ps1
-Test-Header "T06 — Inclusion Proofs"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Test-Header "T06 � Inclusion Proofs"
 Reset-Org "t06a"
 
 Write-Host "  [CASE] Valid inclusion proof for committed event" -ForegroundColor White

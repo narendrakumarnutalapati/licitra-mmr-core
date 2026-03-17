@@ -1,5 +1,5 @@
-﻿. D:\AI\licitra-mmr-core\tests\_common.ps1
-Test-Header "T11 — PowerShell Workflow Scripts"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Test-Header "T11 � PowerShell Workflow Scripts"
 $root = "D:\AI\licitra-mmr-core"
 $required = @(
     "run_server.ps1","run_demo_2org.ps1","run_demo_big.ps1",

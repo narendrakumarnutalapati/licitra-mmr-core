@@ -1,5 +1,5 @@
-﻿. D:\AI\licitra-mmr-core\tests\_common.ps1
-Test-Header "T02 — Guarded Commit Pipeline"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Test-Header "T02 � Guarded Commit Pipeline"
 Reset-Org "t02a"; Reset-Org "t02b"; Reset-Org "t02c"; Reset-Org "t02d"
 
 Write-Host "  [CASE] Happy path: valid propose -> APPROVED -> commit" -ForegroundColor White

@@ -1,5 +1,5 @@
-﻿. D:\AI\licitra-mmr-core\tests\_common.ps1
-Test-Header "T07 — Evidence Bundle"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Test-Header "T07 � Evidence Bundle"
 Reset-Org "t07a"
 Write-Host "  Committing 1000 events..." -ForegroundColor Gray
 Commit-N -OrgId "t07a" -AgentId "agent-t07a" -Count 1000 | Out-Null

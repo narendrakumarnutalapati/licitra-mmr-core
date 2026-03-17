@@ -1,5 +1,5 @@
-﻿# _common.ps1 — source this file in every test script
-# Usage: . D:\AI\licitra-mmr-core\tests\_common.ps1
+# _common.ps1 � source this file in every test script
+# Usage: . (Join-Path $PSScriptRoot "_common.ps1")
 
 $BASE = "http://localhost:8000"
 
@@ -87,15 +87,15 @@ function Fail {
 function Test-Header {
     param([string]$Title)
     Write-Host ""
-    Write-Host "════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "------------------------------------------------------------" -ForegroundColor Cyan
     Write-Host "  $Title" -ForegroundColor Cyan
-    Write-Host "════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "------------------------------------------------------------" -ForegroundColor Cyan
     Write-Host ""
 }
 
 function Test-Footer {
     Write-Host ""
-    Write-Host "────────────────────────────────────────────────────────────"
+    Write-Host "------------------------------------------------------------"
     if ($global:T_FAIL -eq 0) {
         Write-Host "  RESULT : PASS ($global:T_PASS checks passed)" -ForegroundColor Green
     } else {

@@ -1,5 +1,5 @@
-﻿. D:\AI\licitra-mmr-core\tests\_common.ps1
-Test-Header "T09 — DEV_MODE Endpoints"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Test-Header "T09 � DEV_MODE Endpoints"
 Reset-Org "t09a"
 Write-Host "  Committing 1000 events..." -ForegroundColor Gray
 $first = Commit-N -OrgId "t09a" -AgentId "agent-t09a" -Count 1000

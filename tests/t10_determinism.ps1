@@ -1,5 +1,5 @@
-ï»¿. D:\AI\licitra-mmr-core\tests\_common.ps1
-Test-Header "T10 â€” Determinism & Constraints"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Test-Header "T10 — Determinism & Constraints"
 Reset-Org "t10a"; Reset-Org "t10b"; Reset-Org "t10c"
 
 Write-Host "  [CASE] Per-org monotonic seq enforced by DB" -ForegroundColor White
@@ -21,7 +21,7 @@ try {
 Write-Host ""
 Write-Host "  [CASE] Deterministic canonicalization" -ForegroundColor White
 try {
-    # Same logical payload, different key order â€” both are valid proposals
+    # Same logical payload, different key order — both are valid proposals
     $payload_a = '{"action_type":"read","agent_id":"agent-canon","description":"determinism test","seq_hint":1,"timestamp":"2026-01-01T00:00:00Z"}'
     $payload_b = '{"timestamp":"2026-01-01T00:00:00Z","seq_hint":1,"agent_id":"agent-canon","description":"determinism test","action_type":"read"}'
     $ca = Propose-And-Commit "t10b" "agent-canon" $payload_a

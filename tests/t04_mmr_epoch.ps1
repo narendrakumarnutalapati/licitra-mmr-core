@@ -1,5 +1,5 @@
-﻿. D:\AI\licitra-mmr-core\tests\_common.ps1
-Test-Header "T04 — MMR + Epoch Behavior"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Test-Header "T04 � MMR + Epoch Behavior"
 Reset-Org "t04a"; Reset-Org "t04b"; Reset-Org "t04c"
 
 Write-Host "  [CASE] Exactly 1000 events -> epoch finalized" -ForegroundColor White

@@ -1,4 +1,6 @@
-﻿# Pre-reset all test orgs before suite runs
+# Pre-reset all test orgs before suite runs
+$repoRoot = Split-Path -Parent $PSScriptRoot
+
 $allOrgs = @("t02a","t02b","t02c","t02d","t03a","t03b","t04a","t04b","t04c",
              "t05a","t05b","t05c","t06a","t07a","t08a","t08b","t09a",
              "t10a","t10b","t10c")
@@ -31,12 +33,12 @@ $start   = Get-Date
 
 foreach ($t in $tests) {
     Write-Host ""
-    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkCyan
+    Write-Host "????????????????????????????????????????????????????????????" -ForegroundColor DarkCyan
     Write-Host "  $t" -ForegroundColor Cyan
-    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkCyan
+    Write-Host "????????????????????????????????????????????????????????????" -ForegroundColor DarkCyan
 
     $ts = Get-Date
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\AI\licitra-mmr-core\tests\$t"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot $t)
     $elapsed = [math]::Round(((Get-Date)-$ts).TotalSeconds, 2)
 
     if ($LASTEXITCODE -eq 0) {
@@ -51,9 +53,9 @@ $passed = ($results | Where-Object { $_.Status -eq "PASS" }).Count
 $failed = ($results | Where-Object { $_.Status -eq "FAIL" }).Count
 
 Write-Host ""
-Write-Host "════════════════════════════════════════════════════════════" -ForegroundColor White
+Write-Host "------------------------------------------------------------" -ForegroundColor White
 Write-Host "  LICITRA-MMR TEST RESULTS" -ForegroundColor White
-Write-Host "════════════════════════════════════════════════════════════" -ForegroundColor White
+Write-Host "------------------------------------------------------------" -ForegroundColor White
 Write-Host ""
 
 foreach ($r in $results) {

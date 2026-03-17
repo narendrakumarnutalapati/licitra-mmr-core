@@ -1,5 +1,5 @@
-﻿. D:\AI\licitra-mmr-core\tests\_common.ps1
-Test-Header "T08 — Multi-Org Isolation"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Test-Header "T08 � Multi-Org Isolation"
 Reset-Org "t08a"; Reset-Org "t08b"
 
 try {

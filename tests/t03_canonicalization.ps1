@@ -1,5 +1,5 @@
-﻿. D:\AI\licitra-mmr-core\tests\_common.ps1
-Test-Header "T03 — Canonicalization + Hashing"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Test-Header "T03 � Canonicalization + Hashing"
 Reset-Org "t03a"; Reset-Org "t03b"
 
 Write-Host "  [CASE] Same JSON different key order -> identical leaf_hash" -ForegroundColor White

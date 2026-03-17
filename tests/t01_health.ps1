@@ -1,5 +1,5 @@
-﻿. D:\AI\licitra-mmr-core\tests\_common.ps1
-Test-Header "T01 — Health & Wiring"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Test-Header "T01 � Health & Wiring"
 try {
     $h = Invoke-Api -Method GET -Path "/health"
     if ($h.status -eq "ok" -and $h.service -eq "licitra-mmr") {
