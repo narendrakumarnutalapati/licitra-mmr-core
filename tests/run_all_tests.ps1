@@ -1,16 +1,29 @@
-# Pre-reset all test orgs before suite runs
-$repoRoot = Split-Path -Parent $PSScriptRoot
+﻿# Preflight: require a running server with DEV_MODE enabled
+$health = Invoke-RestMethod -Uri "http://localhost:8000/health" -Method GET
 
-$allOrgs = @("t02a","t02b","t02c","t02d","t03a","t03b","t04a","t04b","t04c",
-             "t05a","t05b","t05c","t06a","t07a","t08a","t08b","t09a",
-             "t10a","t10b","t10c")
+Write-Host "Test suite preflight..." -ForegroundColor Yellow
+Write-Host "  status      : $($health.status)" -ForegroundColor Gray
+Write-Host "  block_size  : $($health.block_size)" -ForegroundColor Gray
+Write-Host "  dev_mode    : $($health.dev_mode)" -ForegroundColor Gray
+Write-Host "  ledger_mode : $($health.ledger_mode)" -ForegroundColor Gray
 
+if (-not $health.dev_mode) {
+    Write-Host ""
+    Write-Host "FAILED: test suite requires DEV_MODE=true because it pre-resets orgs and validates DEV endpoints." -ForegroundColor Red
+    exit 1
+}
+
+$allOrgs = @(
+    "t02a","t02b","t02c","t02d","t03a","t03b","t04a","t04b","t04c",
+    "t05a","t05b","t05c","t06a","t07a","t08a","t08b","t09a",
+    "t10a","t10b","t10c"
+)
+
+Write-Host ""
 Write-Host "Pre-resetting all test orgs..." -ForegroundColor Yellow
 foreach ($o in $allOrgs) {
-    try {
-        Invoke-RestMethod -Uri "http://localhost:8000/dev/reset/$o" -Method POST | Out-Null
-        Write-Host "  reset $o" -ForegroundColor Gray
-    } catch {}
+    Invoke-RestMethod -Uri "http://localhost:8000/dev/reset/$o" -Method POST | Out-Null
+    Write-Host "  reset $o" -ForegroundColor Gray
 }
 Write-Host "Done. Starting test suite.`n" -ForegroundColor Yellow
 
@@ -33,22 +46,22 @@ $start   = Get-Date
 
 foreach ($t in $tests) {
     Write-Host ""
-    Write-Host "????????????????????????????????????????????????????????????" -ForegroundColor DarkCyan
+    Write-Host "------------------------------------------------------------" -ForegroundColor DarkCyan
     Write-Host "  $t" -ForegroundColor Cyan
-    Write-Host "????????????????????????????????????????????????????????????" -ForegroundColor DarkCyan
+    Write-Host "------------------------------------------------------------" -ForegroundColor DarkCyan
 
     $ts = Get-Date
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot $t)
-    $elapsed = [math]::Round(((Get-Date)-$ts).TotalSeconds, 2)
+    $elapsed = [math]::Round(((Get-Date) - $ts).TotalSeconds, 2)
 
     if ($LASTEXITCODE -eq 0) {
-        $results += [PSCustomObject]@{ Test=$t; Status="PASS"; Elapsed=$elapsed }
+        $results += [PSCustomObject]@{ Test = $t; Status = "PASS"; Elapsed = $elapsed }
     } else {
-        $results += [PSCustomObject]@{ Test=$t; Status="FAIL"; Elapsed=$elapsed }
+        $results += [PSCustomObject]@{ Test = $t; Status = "FAIL"; Elapsed = $elapsed }
     }
 }
 
-$total  = [math]::Round(((Get-Date)-$start).TotalSeconds, 2)
+$total  = [math]::Round(((Get-Date) - $start).TotalSeconds, 2)
 $passed = ($results | Where-Object { $_.Status -eq "PASS" }).Count
 $failed = ($results | Where-Object { $_.Status -eq "FAIL" }).Count
 

@@ -22,6 +22,7 @@ Every action taken by an AI agent is committed to an append-only cryptographic s
 - [Architecture](#architecture)
 - [API Reference](#api-reference)
 - [Quick Start](#quick-start)
+- [Environment Modes](#environment-modes-important)
 - [Test Suite](#test-suite)
 - [Experiments](#experiments)
 - [Evidence Bundles](#evidence-bundles)
@@ -125,9 +126,7 @@ Each organization has a completely independent MMR, epoch chain, and event seque
 
 ## Architecture
 
-<p align="center">
-  <img src="docs/architecture.png" width="850">
-</p>
+![LICITRA-MMR Architecture](docs/architecture.png)
 
 *Figure 1 — LICITRA-MMR pipeline: agent actions pass through policy evaluation, canonical serialization, SHA-256 hashing, MMR append, and epoch sealing before commitment to persistent storage. Rejected proposals are permanently recorded in staged_events.*
 
@@ -158,7 +157,7 @@ The API layer orchestrates a pipeline consisting of canonical JSON serialization
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/health` | Service health + DB check |
+| `GET` | `/health` | Service health + active runtime configuration |
 | `POST` | `/agent/propose` | Submit action for policy evaluation |
 | `POST` | `/agent/commit/{staged_id}` | Commit an APPROVED proposal |
 | `GET` | `/verify/{org_id}` | Full cryptographic verification |
@@ -199,20 +198,45 @@ pip install -r requirements.txt
 
 ### Configure
 
-Create `.env` in the project root:
+LICITRA-MMR ships with explicit environment templates (`.env.default`, `.env.test`, and `.env.experiment`).
 
+Edit the templates to match your local PostgreSQL configuration, then select a mode:
+
+```powershell
+.\scripts\switch_env.ps1 -mode default
+.\scripts\switch_env.ps1 -mode test
+.\scripts\switch_env.ps1 -mode experiment
 ```
-DATABASE_URL=postgresql://postgres:password@localhost:5432/licitra_mmr
-DEV_MODE=true
-BLOCK_SIZE=1000
-```
+
+This copies the selected template into `.env`.
+
+### Environment Modes (Important)
+
+LICITRA-MMR operates in three explicit modes:
+
+| Mode | BLOCK_SIZE | DEV_MODE | Purpose |
+|------|-----------|----------|---------|
+| Default | 1000 | false | Production-like behavior (no dev endpoints) |
+| Test | 1000 | true | Test suite validation with production-like epoch size |
+| Experiment | 2 | true | Fast experiment validation with immediate proof availability |
+
+- `DEV_MODE=true` is **required** for the test suite and experiment suite. It enables `/dev/*` and tamper endpoints used by tests.
+- `BLOCK_SIZE` affects epoch finalization speed, not correctness. `BLOCK_SIZE=2` makes MMR proofs immediately available; `BLOCK_SIZE=1000` is production-like behavior.
+
+> **Mode Consistency Warning:**
+>
+> Mixing configurations (e.g., `BLOCK_SIZE=1000` with `DEV_MODE=true` outside `test` mode) can produce valid but non-reproducible behavior relative to documented test or experiment expectations.
+>
+> Always use:
+> - `test` mode for test suite validation
+> - `experiment` mode for experiment reproducibility
 
 ### Run
 
 On first startup the service automatically creates the required database tables if they do not exist.
 
 ```bash
-.\run_server.ps1
+.\scripts\run_server.ps1
 ```
 
 Or directly:
@@ -229,7 +253,20 @@ Server starts at `http://localhost:8000`. API docs at `http://localhost:8000/doc
 
 11 independent test suites. Each is a standalone reproducible artifact.
 
-```bash
+**Requires:**
+
+- Running server
+- `BLOCK_SIZE=1000`
+- `DEV_MODE=true`
+
+```powershell
+.\scripts\switch_env.ps1 -mode test
+.\scripts\run_server.ps1
+```
+
+Then:
+
+```powershell
 .\tests\run_all_tests.ps1
 ```
 
@@ -275,19 +312,34 @@ Expected output:
 
 ## Experiments
 
-Five reproducible experiments demonstrate the system's cryptographic guarantees end-to-end.
+Five reproducible MMR-specific experiments demonstrate the ledger's cryptographic guarantees end-to-end.
 
-```bash
-.\run_all_experiments.ps1
+**Requires:**
+
+- Running server
+- `BLOCK_SIZE=2`
+- `DEV_MODE=true`
+
+`experiment` mode is required for reproducible experiment results because it sets `BLOCK_SIZE=2`, ensuring immediate epoch finalization and proof availability.
+
+```powershell
+.\scripts\switch_env.ps1 -mode experiment
+.\scripts\run_server.ps1
+```
+
+Then (in a separate terminal):
+
+```powershell
+.\scripts\run_all_experiments.ps1
 ```
 
 | Experiment | Demonstrates |
 |------------|-------------|
-| exp1 — Clean Commit | Full pipeline from proposal to verified MMR root |
-| exp2 — Event Tamper | Direct DB mutation detected by leaf integrity check |
-| exp3 — Epoch Tamper | Epoch hash corruption detected by chain verification |
-| exp4 — Multi-Org Isolation | Two orgs, one tampered — the other unaffected |
-| exp5 — Guarded Commit | Policy engine blocking high-risk actions |
+| EXP-01 — Clean Commit | Full pipeline from proposal to verified MMR root |
+| EXP-02 — Event Tamper | Direct DB mutation detected by leaf integrity check |
+| EXP-03 — Epoch Tamper | Epoch hash corruption detected by chain verification |
+| EXP-04 — Multi-Org Isolation | Two orgs, one tampered — the other unaffected |
+| EXP-05 — Guarded Commit | Policy engine blocking high-risk actions |
 
 ---
 
@@ -397,21 +449,30 @@ licitra-mmr-core/
 │
 ├── migrations/                         # Database migration scripts
 │
-├── exp1_clean_commit.ps1              # Experiment 1: Full pipeline to verified root
-├── exp2_event_tamper.ps1              # Experiment 2: Direct DB mutation detection
-├── exp3_epoch_tamper.ps1              # Experiment 3: Epoch hash corruption detection
-├── exp4_multiorg_isolation.ps1        # Experiment 4: Cross-org isolation proof
-├── exp5_guarded_commit.ps1            # Experiment 5: Policy engine blocking
-├── run_all_experiments.ps1            # Run all 5 experiments
-├── run_demo_2org.ps1                  # Demo: two-org scenario
-├── run_demo_big.ps1                   # Demo: large-scale ingestion
-├── run_server.ps1                     # Start FastAPI server
-├── export_artifacts.ps1               # Export evidence artifacts
+├── scripts/                            # Operational scripts
+│   ├── run_server.ps1                 # Start FastAPI server
+│   ├── run_all_experiments.ps1        # Run all 5 experiments
+│   ├── run_demo_2org.ps1              # Demo: two-org scenario
+│   ├── run_demo_big.ps1              # Demo: large-scale ingestion
+│   ├── export_artifacts.ps1           # Export evidence artifacts
+│   └── switch_env.ps1                 # Switch between default/test/experiment mode
+│
+├── experiments/                        # Experiment scripts
+│   └── powershell/
+│       ├── exp1_clean_commit.ps1      # Experiment 1: Full pipeline to verified root
+│       ├── exp2_event_tamper.ps1      # Experiment 2: Direct DB mutation detection
+│       ├── exp3_epoch_tamper.ps1      # Experiment 3: Epoch hash corruption detection
+│       ├── exp4_multiorg_isolation.ps1 # Experiment 4: Cross-org isolation proof
+│       └── exp5_guarded_commit.ps1    # Experiment 5: Policy engine blocking
 │
 ├── CANONICAL_JSON_SPEC.md             # Canonical JSON serialization specification
 ├── DESIGN_DECISIONS.md                # Architecture rationale document
 ├── SECURITY.md                        # Security policy and vulnerability disclosure
 ├── requirements.txt                   # Python dependencies
+├── .env                               # Active configuration (generated by switch_env.ps1)
+├── .env.default                       # Default mode template (BLOCK_SIZE=1000, DEV_MODE=false)
+├── .env.test                          # Test mode template (BLOCK_SIZE=1000, DEV_MODE=true)
+├── .env.experiment                    # Experiment mode template (BLOCK_SIZE=2, DEV_MODE=true)
 ├── .gitignore
 ├── .gitattributes
 ├── README.md                          # This file

@@ -1,17 +1,41 @@
 ﻿# =============================================================================
 # LICITRA-MMR | run_all_experiments.ps1
 # Runs all 5 experiments in sequence. Use for CI or full demo.
-# Each experiment is independently reproducible as a standalone script.
 # =============================================================================
 
 param([string]$BaseUrl = "http://localhost:8000")
 
+$repoRoot = Split-Path -Parent $PSScriptRoot
+
+function Get-Health {
+    param([string]$Url)
+    return Invoke-RestMethod -Uri "$Url/health" -Method GET
+}
+
+$health = Get-Health -Url $BaseUrl
+
+Write-Host ""
+Write-Host "================================================================" -ForegroundColor White
+Write-Host "  EXPERIMENT SUITE PREFLIGHT" -ForegroundColor White
+Write-Host "================================================================" -ForegroundColor White
+Write-Host "  status       : $($health.status)"
+Write-Host "  block_size   : $($health.block_size)"
+Write-Host "  dev_mode     : $($health.dev_mode)"
+Write-Host "  ledger_mode  : $($health.ledger_mode)"
+Write-Host "  ledger_ver   : $($health.ledger_version)"
+Write-Host ""
+
+if (-not $health.dev_mode) {
+    Write-Host "FAILED: experiments require DEV_MODE=true because they use /dev/reset and tamper endpoints." -ForegroundColor Red
+    exit 1
+}
+
 $scripts = @(
-    "exp1_clean_commit.ps1",
-    "exp2_event_tamper.ps1",
-    "exp3_epoch_tamper.ps1",
-    "exp4_multiorg_isolation.ps1",
-    "exp5_guarded_commit.ps1"
+    "experiments\powershell\exp1_clean_commit.ps1",
+    "experiments\powershell\exp2_event_tamper.ps1",
+    "experiments\powershell\exp3_epoch_tamper.ps1",
+    "experiments\powershell\exp4_multiorg_isolation.ps1",
+    "experiments\powershell\exp5_guarded_commit.ps1"
 )
 
 $results = @()
@@ -24,8 +48,10 @@ foreach ($script in $scripts) {
     Write-Host "================================================================" -ForegroundColor DarkCyan
 
     $start = Get-Date
+    $scriptPath = Join-Path $repoRoot $script
+
     try {
-        & ".\$script" -BaseUrl $BaseUrl
+        & $scriptPath -BaseUrl $BaseUrl
         $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds, 2)
         $results += [PSCustomObject]@{ Script = $script; Status = "PASS"; Elapsed = $elapsed }
     } catch {
@@ -44,7 +70,7 @@ Write-Host "================================================================" -F
 
 foreach ($r in $results) {
     $color = if ($r.Status -eq "PASS") { "Green" } else { "Red" }
-    Write-Host ("  [{0}]  {1,-40} {2}s" -f $r.Status, $r.Script, $r.Elapsed) -ForegroundColor $color
+    Write-Host ("  [{0}]  {1,-55} {2}s" -f $r.Status, $r.Script, $r.Elapsed) -ForegroundColor $color
 }
 
 Write-Host ""
